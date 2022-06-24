@@ -1,1 +1,4 @@
-# simple-jdbc-filestore
+simple-jdbc-filestore
+=====================
+
+Basic DBMS-based filestore

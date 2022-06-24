@@ -1,0 +1,11 @@
+*.versionsBackup
+.classpath
+.DS_Store
+.factorypath
+.flattened-pom.xml
+.project
+.settings/
+/bin/
+/target/
+hs_err_pid*.log
+junit*.properties
