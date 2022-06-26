@@ -28,10 +28,7 @@ import org.springframework.jdbc.core.StatementCallback;
 import org.springframework.jdbc.core.support.AbstractLobCreatingPreparedStatementCallback;
 import org.springframework.jdbc.support.lob.DefaultLobHandler;
 import org.springframework.jdbc.support.lob.LobCreator;
-import org.springframework.transaction.annotation.Propagation;
-import org.springframework.transaction.annotation.Transactional;
 
-@Transactional
 public class SimpleJdbcFileStore implements SimpleFileStore {
 
 	private static final Logger log = Logger.getLogger(SimpleJdbcFileStore.class.getName());
@@ -65,7 +62,6 @@ public class SimpleJdbcFileStore implements SimpleFileStore {
 	}
 
 	@Override
-	@Transactional(propagation = Propagation.SUPPORTS, readOnly = true)
 	public List<Resource> list() throws IOException {
 		final String sql = "SELECT filename, content_length, last_modified FROM " + sanitizeTableName(tableName);
 		log.fine(sql);
@@ -78,7 +74,6 @@ public class SimpleJdbcFileStore implements SimpleFileStore {
 	}
 
 	@Override
-	@Transactional(propagation = Propagation.SUPPORTS, readOnly = true)
 	public Resource get(final String fileName) throws IOException {
 		Objects.requireNonNull(fileName, "fileName must not be null");
 		final String sql = "SELECT content_length, last_modified FROM " + sanitizeTableName(tableName) + " WHERE filename = ?";

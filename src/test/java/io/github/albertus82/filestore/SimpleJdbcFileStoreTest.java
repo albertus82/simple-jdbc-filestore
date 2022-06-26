@@ -21,23 +21,27 @@ import java.util.zip.GZIPInputStream;
 
 import javax.sql.DataSource;
 
-import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.core.io.DescriptiveResource;
 import org.springframework.core.io.FileSystemResource;
 import org.springframework.core.io.InputStreamResource;
 import org.springframework.core.io.Resource;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.springframework.jdbc.datasource.init.ResourceDatabasePopulator;
+import org.springframework.test.context.junit.jupiter.SpringJUnitConfig;
+import org.springframework.transaction.annotation.Transactional;
 
+@SpringJUnitConfig(TestConfig.class)
 class SimpleJdbcFileStoreTest {
 
-	private static JdbcTemplate jdbcTemplate;
+	@Autowired
+	private JdbcTemplate jdbcTemplate;
 
 	@BeforeAll
 	static void beforeAll() {
@@ -45,24 +49,16 @@ class SimpleJdbcFileStoreTest {
 		for (final Handler h : Logger.getLogger("").getHandlers()) {
 			h.setLevel(Level.FINE);
 		}
-		//@formatter:off
-		final DataSource dataSource = new DriverManagerDataSource(
-				"jdbc:h2:mem:test;DB_CLOSE_DELAY=-1"
-//				"jdbc:oracle:thin:@localhost:1521/XEPDB1", "test", "test"
-		);
-		//@formatter:on
-		new ResourceDatabasePopulator(new ClassPathResource(SimpleJdbcFileStoreTest.class.getPackageName().replace('.', '/') + "/table.sql")).execute(dataSource);
-		jdbcTemplate = new JdbcTemplate(dataSource);
 	}
 
-	@AfterAll
-	static void afterAll() {
-		jdbcTemplate.execute("DROP TABLE storage");
+	@BeforeEach
+	void beforeEach() {
+		new ResourceDatabasePopulator(new ClassPathResource(getClass().getPackageName().replace('.', '/') + "/table.sql")).execute(jdbcTemplate.getDataSource());
 	}
 
 	@AfterEach
 	void afterEach() {
-		jdbcTemplate.execute("DELETE FROM storage");
+		jdbcTemplate.execute("DROP TABLE storage");
 	}
 
 	@Test
@@ -259,6 +255,35 @@ class SimpleJdbcFileStoreTest {
 				throw new RuntimeException(e);
 			}
 		});
+	}
+
+	@Test
+	@Transactional
+	void testStoreLargeTransactional() throws Exception {
+		for (final Compression compression : Compression.values()) {
+			final String fileName = UUID.randomUUID().toString();
+			final SimpleFileStore store = new SimpleJdbcFileStore(jdbcTemplate.getDataSource(), "STORAGE", compression, new DirectBlobExtractor());
+			try (final InputStream is = getClass().getResourceAsStream("/32m.txt.gz"); final GZIPInputStream gzis = new GZIPInputStream(is)) {
+				Assertions.assertDoesNotThrow(() -> store.store(new InputStreamResource(gzis), fileName));
+			}
+
+			final byte[] buffer = new byte[8192];
+			final MessageDigest digestSource = MessageDigest.getInstance("SHA-256");
+			try (final InputStream is = getClass().getResourceAsStream("/32m.txt.gz"); final GZIPInputStream gzis = new GZIPInputStream(is)) {
+				int bytesCount = 0;
+				while ((bytesCount = gzis.read(buffer)) != -1) {
+					digestSource.update(buffer, 0, bytesCount);
+				}
+			}
+			final MessageDigest digestStored = MessageDigest.getInstance("SHA-256");
+			try (final InputStream stored = store.get(fileName).getInputStream()) {
+				int bytesCount = 0;
+				while ((bytesCount = stored.read(buffer)) != -1) {
+					digestStored.update(buffer, 0, bytesCount);
+				}
+			}
+			Assertions.assertArrayEquals(digestSource.digest(), digestStored.digest());
+		}
 	}
 
 	@Test
