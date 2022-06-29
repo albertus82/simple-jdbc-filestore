@@ -2,11 +2,16 @@ package io.github.albertus82.filestore;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.RandomAccessFile;
 import java.io.UncheckedIOException;
+import java.io.Writer;
+import java.nio.channels.FileChannel;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -17,7 +22,6 @@ import java.util.concurrent.TimeUnit;
 import java.util.logging.Handler;
 import java.util.logging.Level;
 import java.util.logging.Logger;
-import java.util.zip.GZIPInputStream;
 
 import javax.sql.DataSource;
 
@@ -36,9 +40,14 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.init.ResourceDatabasePopulator;
 import org.springframework.test.context.junit.jupiter.SpringJUnitConfig;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.unit.DataSize;
+
+import com.thedeanda.lorem.LoremIpsum;
 
 @SpringJUnitConfig(TestConfig.class)
 class SimpleJdbcFileStoreTest {
+
+	private static final Logger log = Logger.getLogger(SimpleJdbcFileStoreTest.class.getName());
 
 	@Autowired
 	private JdbcTemplate jdbcTemplate;
@@ -221,68 +230,83 @@ class SimpleJdbcFileStoreTest {
 
 	@Test
 	void testStoreLarge() throws Exception {
-		List.of(new FileBufferedBlobExtractor(), new MemoryBufferedBlobExtractor()).parallelStream().forEach(be -> {
-			try {
-				for (final Compression compression : Compression.values()) {
-					final String fileName = UUID.randomUUID().toString();
-					final SimpleFileStore store = new SimpleJdbcFileStore(jdbcTemplate.getDataSource(), "STORAGE", compression, be);
-					try (final InputStream is = getClass().getResourceAsStream("/32m.txt.gz"); final GZIPInputStream gzis = new GZIPInputStream(is)) {
-						Assertions.assertDoesNotThrow(() -> store.store(new InputStreamResource(gzis), fileName));
-					}
+		Path tempFile = null;
+		try {
+			tempFile = createDummyFile(DataSize.ofMegabytes(32));
+			final Path f = tempFile;
+			List.of(new FileBufferedBlobExtractor(), new MemoryBufferedBlobExtractor()).parallelStream().forEach(be -> {
+				try {
+					for (final Compression compression : Compression.values()) {
+						final String fileName = UUID.randomUUID().toString();
+						final SimpleFileStore store = new SimpleJdbcFileStore(jdbcTemplate.getDataSource(), "STORAGE", compression, be);
+						try (final InputStream is = Files.newInputStream(f)) {
+							Assertions.assertDoesNotThrow(() -> store.store(new InputStreamResource(is), fileName));
+						}
 
-					final byte[] buffer = new byte[8192];
-					final MessageDigest digestSource = MessageDigest.getInstance("SHA-256");
-					try (final InputStream is = getClass().getResourceAsStream("/32m.txt.gz"); final GZIPInputStream gzis = new GZIPInputStream(is)) {
-						int bytesCount = 0;
-						while ((bytesCount = gzis.read(buffer)) != -1) {
-							digestSource.update(buffer, 0, bytesCount);
+						final byte[] buffer = new byte[8192];
+						final MessageDigest digestSource = MessageDigest.getInstance("SHA-256");
+						try (final InputStream is = Files.newInputStream(f)) {
+							int bytesCount = 0;
+							while ((bytesCount = is.read(buffer)) != -1) {
+								digestSource.update(buffer, 0, bytesCount);
+							}
 						}
-					}
-					final MessageDigest digestStored = MessageDigest.getInstance("SHA-256");
-					try (final InputStream stored = store.get(fileName).getInputStream()) {
-						int bytesCount = 0;
-						while ((bytesCount = stored.read(buffer)) != -1) {
-							digestStored.update(buffer, 0, bytesCount);
+						final MessageDigest digestStored = MessageDigest.getInstance("SHA-256");
+						try (final InputStream stored = store.get(fileName).getInputStream()) {
+							int bytesCount = 0;
+							while ((bytesCount = stored.read(buffer)) != -1) {
+								digestStored.update(buffer, 0, bytesCount);
+							}
 						}
+						Assertions.assertArrayEquals(digestSource.digest(), digestStored.digest());
 					}
-					Assertions.assertArrayEquals(digestSource.digest(), digestStored.digest());
 				}
-			}
-			catch (IOException e) {
-				throw new UncheckedIOException(e);
-			}
-			catch (final NoSuchAlgorithmException e) {
-				throw new RuntimeException(e);
-			}
-		});
+				catch (IOException e) {
+					throw new UncheckedIOException(e);
+				}
+				catch (final NoSuchAlgorithmException e) {
+					throw new RuntimeException(e);
+				}
+			});
+		}
+		finally {
+			deleteIfExists(tempFile);
+		}
 	}
 
 	@Test
 	@Transactional
 	void testStoreLargeTransactional() throws Exception {
-		for (final Compression compression : Compression.values()) {
-			final String fileName = UUID.randomUUID().toString();
-			final SimpleFileStore store = new SimpleJdbcFileStore(jdbcTemplate.getDataSource(), "STORAGE", compression, new DirectBlobExtractor());
-			try (final InputStream is = getClass().getResourceAsStream("/32m.txt.gz"); final GZIPInputStream gzis = new GZIPInputStream(is)) {
-				Assertions.assertDoesNotThrow(() -> store.store(new InputStreamResource(gzis), fileName));
-			}
+		Path tempFile = null;
+		try {
+			tempFile = createDummyFile(DataSize.ofMegabytes(32));
+			for (final Compression compression : Compression.values()) {
+				final String fileName = UUID.randomUUID().toString();
+				final SimpleFileStore store = new SimpleJdbcFileStore(jdbcTemplate.getDataSource(), "STORAGE", compression, new DirectBlobExtractor());
+				try (final InputStream is = Files.newInputStream(tempFile)) {
+					Assertions.assertDoesNotThrow(() -> store.store(new InputStreamResource(is), fileName));
+				}
 
-			final byte[] buffer = new byte[8192];
-			final MessageDigest digestSource = MessageDigest.getInstance("SHA-256");
-			try (final InputStream is = getClass().getResourceAsStream("/32m.txt.gz"); final GZIPInputStream gzis = new GZIPInputStream(is)) {
-				int bytesCount = 0;
-				while ((bytesCount = gzis.read(buffer)) != -1) {
-					digestSource.update(buffer, 0, bytesCount);
+				final byte[] buffer = new byte[8192];
+				final MessageDigest digestSource = MessageDigest.getInstance("SHA-256");
+				try (final InputStream is = Files.newInputStream(tempFile)) {
+					int bytesCount = 0;
+					while ((bytesCount = is.read(buffer)) != -1) {
+						digestSource.update(buffer, 0, bytesCount);
+					}
 				}
-			}
-			final MessageDigest digestStored = MessageDigest.getInstance("SHA-256");
-			try (final InputStream stored = store.get(fileName).getInputStream()) {
-				int bytesCount = 0;
-				while ((bytesCount = stored.read(buffer)) != -1) {
-					digestStored.update(buffer, 0, bytesCount);
+				final MessageDigest digestStored = MessageDigest.getInstance("SHA-256");
+				try (final InputStream stored = store.get(fileName).getInputStream()) {
+					int bytesCount = 0;
+					while ((bytesCount = stored.read(buffer)) != -1) {
+						digestStored.update(buffer, 0, bytesCount);
+					}
 				}
+				Assertions.assertArrayEquals(digestSource.digest(), digestStored.digest());
 			}
-			Assertions.assertArrayEquals(digestSource.digest(), digestStored.digest());
+		}
+		finally {
+			deleteIfExists(tempFile);
 		}
 	}
 
@@ -296,6 +320,46 @@ class SimpleJdbcFileStoreTest {
 		Assertions.assertEquals(1, list.size());
 		try (final InputStream is = getClass().getResourceAsStream("/10b.txt")) {
 			Assertions.assertThrows(FileAlreadyExistsException.class, () -> store.store(new InputStreamResource(is), "myfile.txt"));
+		}
+	}
+
+	private static Path createDummyFile(final DataSize size) throws IOException {
+		if (size == null) {
+			throw new NullPointerException();
+		}
+		if (size.toBytes() < 0) {
+			throw new IllegalArgumentException(size.toString());
+		}
+		log.log(Level.FINE, "Creating {0} dummy file...", size);
+		long currSize = 0;
+		final Path tmp = Files.createTempFile(null, null);
+		tmp.toFile().deleteOnExit();
+		try (final Writer w = Files.newBufferedWriter(tmp, StandardCharsets.US_ASCII, StandardOpenOption.TRUNCATE_EXISTING)) {
+			while (currSize < size.toBytes()) {
+				final String s = LoremIpsum.getInstance().getWords(100);
+				currSize += s.length();
+				w.append(s).append(System.lineSeparator());
+			}
+		}
+		try (final RandomAccessFile raf = new RandomAccessFile(tmp.toFile(), "rw"); final FileChannel fc = raf.getChannel()) {
+			fc.truncate(size.toBytes());
+		}
+		if (tmp.toFile().length() != size.toBytes()) {
+			throw new IllegalStateException();
+		}
+		log.log(Level.FINE, "Dummy file created: \"{0}\".", tmp);
+		return tmp;
+	}
+
+	private static void deleteIfExists(final Path file) {
+		if (file != null) {
+			try {
+				Files.deleteIfExists(file);
+			}
+			catch (final IOException e) {
+				log.log(Level.FINE, e, () -> "Cannot delete file \"" + file + "\":");
+				file.toFile().deleteOnExit();
+			}
 		}
 	}
 
