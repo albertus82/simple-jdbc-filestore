@@ -20,8 +20,8 @@ public class TestConfig {
 	DataSource dataSource() {
 		//@formatter:off
 		return new DriverManagerDataSource(
-				"jdbc:h2:mem:test;DB_CLOSE_DELAY=-1"
-//				"jdbc:oracle:thin:@localhost:1521/XEPDB1", "test", "test"
+//				"jdbc:h2:mem:test;DB_CLOSE_DELAY=-1"
+				"jdbc:oracle:thin:@localhost:1521/XEPDB1", "test", "test"
 		);
 		//@formatter:on
 	}

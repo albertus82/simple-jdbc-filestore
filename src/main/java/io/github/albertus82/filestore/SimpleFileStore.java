@@ -7,14 +7,14 @@ import org.springframework.core.io.Resource;
 
 public interface SimpleFileStore {
 
-	List<Resource> list() throws IOException;
+	List<Resource> list(String dir, boolean recurse) throws IOException;
 
-	Resource get(String fileName) throws IOException;
+	Resource get(String path) throws IOException;
 
-	void store(Resource resource, String fileName) throws IOException;
+	void write(String path, Resource resource) throws IOException;
 
-	void rename(String oldFileName, String newFileName) throws IOException;
+	void move(String source, String target) throws IOException;
 
-	void delete(String fileName) throws IOException;
+	void delete(String path) throws IOException;
 
 }
