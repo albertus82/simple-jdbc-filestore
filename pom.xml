@@ -6,7 +6,7 @@
 
 	<groupId>io.github.albertus82</groupId>
 	<artifactId>simple-jdbc-filestore</artifactId>
-	<version>0.0.1-SNAPSHOT</version>
+	<version>0.2.0-SNAPSHOT</version>
 	<name>Simple JDBC Filestore</name>
 	<url>https://github.com/albertus82/simple-jdbc-filestore</url>
 	<description>Basic DBMS-based filestore</description>
