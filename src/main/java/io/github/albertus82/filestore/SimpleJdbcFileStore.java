@@ -5,6 +5,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.NoSuchFileException;
+import java.nio.file.NotDirectoryException;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
 import java.sql.Statement;
@@ -68,10 +69,17 @@ public class SimpleJdbcFileStore implements SimpleFileStore {
 	@Override
 	public List<Resource> list(final String dir, final boolean recurse) throws IOException {
 		final Path path = Path.forDirectory(dir);
-		final String sql = "SELECT directory, filename, content_length, last_modified FROM " + sanitizeTableName(tableName) + " WHERE directory " + (recurse ? "LIKE ? ESCAPE '" + escapeChar + "'" : "= ?");
+		return list(path, recurse);
+	}
+
+	private List<Resource> list(final Path dir, final boolean recurse) throws IOException {
+		if (!dir.isDirectory()) {
+			throw new NotDirectoryException(dir.toString());
+		}
+		final String sql = "SELECT directory, filename, content_length, last_modified FROM " + sanitizeTableName(tableName) + " WHERE directory " + (recurse ? "LIKE ? ESCAPE '" + escapeChar + "'" : "= ?") + " ORDER BY directory ASC, filename ASC";
 		log.fine(sql);
 		try {
-			return jdbcTemplate.query(sql, (rs, rowNum) -> new DatabaseResource(Path.forFile(rs.getString(1) + rs.getString(2)), rs.getLong(3), rs.getTimestamp(4).getTime()), recurse ? path.getDirectory().replace("_", escapeChar + "_").replace("%", escapeChar + "%") + '%' : path.getDirectory());
+			return jdbcTemplate.query(sql, (rs, rowNum) -> new DatabaseResource(Path.forFile(rs.getString(1) + rs.getString(2)), rs.getLong(3), rs.getTimestamp(4).getTime()), recurse ? dir.getDirectory().replace("_", escapeChar + "_").replace("%", escapeChar + "%") + '%' : dir.getDirectory());
 		}
 		catch (final DataAccessException e) {
 			throw new IOException(e);
@@ -98,7 +106,7 @@ public class SimpleJdbcFileStore implements SimpleFileStore {
 			}, path.getDirectory(), path.getFileName());
 		}
 		catch (final EmptyResultDataAccessException e) {
-			log.log(Level.FINE, e, () -> path.toString());
+			log.log(Level.FINE, e, path::toString);
 			throw new NoSuchFileException(path.toString());
 		}
 		catch (final DataAccessException e) {
@@ -108,8 +116,8 @@ public class SimpleJdbcFileStore implements SimpleFileStore {
 
 	@Override
 	public void write(final String path, final Resource resource) throws IOException {
-		Objects.requireNonNull(resource, "resource must not be null");
 		Objects.requireNonNull(path, "path must not be null");
+		Objects.requireNonNull(resource, "resource must not be null");
 		write(Path.forFile(path), resource);
 	}
 
@@ -156,12 +164,12 @@ public class SimpleJdbcFileStore implements SimpleFileStore {
 
 	@Override
 	public void move(final String source, final String target) throws IOException {
-		Objects.requireNonNull(source, "oldPath must not be null");
-		Objects.requireNonNull(target, "newPath must not be null");
+		Objects.requireNonNull(source, "source must not be null");
+		Objects.requireNonNull(target, "target must not be null");
 		move(Path.forFile(source), Path.forFile(target));
 	}
 
-	private void move(final Path source, final Path target) throws IOException, NoSuchFileException, FileAlreadyExistsException {
+	private void move(final Path source, final Path target) throws IOException {
 		final String sql = "UPDATE " + sanitizeTableName(tableName) + " SET directory = ?, filename = ? WHERE directory = ? AND filename = ?";
 		log.fine(sql);
 		try {
@@ -183,7 +191,7 @@ public class SimpleJdbcFileStore implements SimpleFileStore {
 		delete(Path.forFile(path));
 	}
 
-	private void delete(final Path path) throws IOException, NoSuchFileException {
+	private void delete(final Path path) throws IOException {
 		final String sql = "DELETE FROM " + sanitizeTableName(tableName) + " WHERE directory = ? AND filename = ?";
 		log.fine(sql);
 		try {
@@ -230,7 +238,7 @@ public class SimpleJdbcFileStore implements SimpleFileStore {
 		private final long lastModified;
 
 		private DatabaseResource(final Path path, final long contentLength, final long lastModified) {
-			Objects.requireNonNull(path, "fileName must not be null");
+			Objects.requireNonNull(path, "path must not be null");
 			this.path = path;
 			this.contentLength = contentLength;
 			this.lastModified = lastModified;
@@ -266,7 +274,7 @@ public class SimpleJdbcFileStore implements SimpleFileStore {
 
 		@Override
 		public String getDescription() {
-			return "Database resource [" + path + "]";
+			return path.toString();
 		}
 
 		@Override
@@ -286,7 +294,7 @@ public class SimpleJdbcFileStore implements SimpleFileStore {
 				}, path.getDirectory(), path.getFileName());
 			}
 			catch (final EmptyResultDataAccessException e) {
-				log.log(Level.FINE, e, () -> path.toString());
+				log.log(Level.FINE, e, path::toString);
 				throw new NoSuchFileException(path.toString());
 			}
 			catch (final DataAccessException e) {
@@ -334,11 +342,11 @@ public class SimpleJdbcFileStore implements SimpleFileStore {
 				}
 			}
 			String canonicalizedPath = Arrays.stream(fullPath.split(separator + "+")).reduce((a, b) -> a.trim() + separator + b.trim()).orElse(separator);
-			if (fullPath.endsWith(separator)) {
+			if (fullPath.endsWith(separator) && !canonicalizedPath.endsWith(separator)) {
 				canonicalizedPath += separator;
 			}
-			final String directory = canonicalizedPath.substring(0, fullPath.lastIndexOf(separatorChar) + 1);
-			final String fileName = canonicalizedPath.substring(fullPath.lastIndexOf(separatorChar) + 1);
+			final String directory = canonicalizedPath.substring(0, canonicalizedPath.lastIndexOf(separatorChar) + 1);
+			final String fileName = canonicalizedPath.substring(canonicalizedPath.lastIndexOf(separatorChar) + 1);
 			return new Path(directory, fileName);
 		}
 
@@ -355,6 +363,10 @@ public class SimpleJdbcFileStore implements SimpleFileStore {
 
 		private String getFileName() {
 			return fileName;
+		}
+
+		private boolean isDirectory() {
+			return fileName.isEmpty();
 		}
 
 		@Override

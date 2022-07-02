@@ -1,6 +1,6 @@
 CREATE TABLE storage (
     directory        VARCHAR(255) NOT NULL CHECK (directory LIKE '/%' AND directory LIKE '%/'),
-    filename         VARCHAR(255) NOT NULL,
+    filename         VARCHAR(255) NOT NULL CHECK (filename NOT LIKE '%/%'),
     content_length   NUMERIC(19, 0) NOT NULL,
     last_modified    TIMESTAMP NOT NULL,
     file_contents    BLOB NOT NULL,

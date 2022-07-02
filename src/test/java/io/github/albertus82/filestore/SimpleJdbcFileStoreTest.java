@@ -15,6 +15,7 @@ import java.nio.file.StandardOpenOption;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.util.Collections;
 import java.util.Date;
 import java.util.List;
 import java.util.UUID;
@@ -321,6 +322,32 @@ class SimpleJdbcFileStoreTest {
 		try (final InputStream is = getClass().getResourceAsStream("/10b.txt")) {
 			Assertions.assertThrows(FileAlreadyExistsException.class, () -> store.write("myfile.txt", new InputStreamResource(is)));
 		}
+	}
+
+	@Test
+	void testDirectories() throws IOException {
+		final SimpleFileStore store = new SimpleJdbcFileStore(jdbcTemplate.getDataSource(), "STORAGE", Compression.HIGH, new FileBufferedBlobExtractor());
+		Assertions.assertEquals(0, store.list(" ", true).size());
+		Assertions.assertEquals(0, store.list("", true).size());
+		Assertions.assertEquals(0, store.list("/", true).size());
+		Assertions.assertEquals(0, store.list(" / ", true).size());
+		Assertions.assertEquals(0, store.list("\t /  ", true).size());
+
+		Assertions.assertEquals(Collections.emptyList(), store.list("dir 1", false));
+		try (final InputStream is = getClass().getResourceAsStream("/10b.txt")) {
+			store.write("dir 1/file1.txt", new InputStreamResource(is));
+		}
+		Assertions.assertEquals(1, store.list("dir 1", false).size());
+		Assertions.assertEquals(1, store.list(" dir 1", false).size());
+		Assertions.assertEquals(1, store.list(" dir 1 ", false).size());
+		Assertions.assertEquals(1, store.list("  dir 1\t ", false).size());
+		try (final InputStream is = getClass().getResourceAsStream("/10b.txt")) {
+			store.write("dir 2/file1.txt", new InputStreamResource(is));
+		}
+		Assertions.assertEquals(1, store.list("dir 2", false).size());
+		Assertions.assertEquals(2, store.list(" ", true).size());
+		Assertions.assertEquals(2, store.list(null, true).size());
+		Assertions.assertEquals(0, store.list(null, false).size());
 	}
 
 	private static Path createDummyFile(final DataSize size) throws IOException {
